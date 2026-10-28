@@ -63,9 +63,12 @@ final class AmapCruise {
      * 这段时间真的跑出去 120 米，定位精度不差于 60 米，且不能有跳点。
      * 步行 20 秒最多 30 米、拿起来晃一下只有几米，都过不了位移累计这一关。
      */
-    private static final float MIN_KMH = 18f;
     private static final float MAX_KMH = 200f;
-    private static final long DRIVE_MS = 15000L;
+    /** 触发速度下限（km/h）：面板「自动巡航 → 触发速度下限」，默认 18。 */
+    private static float minKmh() { return Config.cruiseMinKmh(); }
+
+    /** 触发持续时间（毫秒）：面板「自动巡航 → 触发持续时间」，默认 15 秒。 */
+    private static long driveMs() { return Config.cruiseDriveSec() * 1000L; }
     /** 窗口内「路径」累计位移下限（米）：18km/h × 15s ≈ 75m，留余量取 60m。 */
     private static final float MIN_DIST_M = 60f;
     /** 窗口内「净位移」下限（米）：起点到当前点的直线距离，原地抖动净位移≈0，永远过不了。 */
@@ -265,8 +268,8 @@ final class AmapCruise {
                     : distanceMeters(winLat, winLng, lastLat, lastLng);
             long fixes = distFixSeq - winBaseFix;
             boolean dbg = "debug".equals(s.src);      // 桌面探针没有真实位移，放行
-            boolean enough = dbg || (dist >= MIN_DIST_M && net >= MIN_NET_M && fixes >= MIN_WIN_FIXES);
-            if (now - speedOkSince >= DRIVE_MS && enough) {
+            boolean enough = dbg || (dist >= distNeedM() && net >= netNeedM() && fixes >= MIN_WIN_FIXES);
+            if (now - speedOkSince >= driveMs() && enough) {
                 speedOkSince = 0;
                 gateWhy = "enter";
                 enterCruise(s.kmh, s.src);
@@ -340,7 +343,7 @@ final class AmapCruise {
             if (SystemClock.elapsedRealtime() - hookAt > 10000L) return null;
             float kmh = unitKmh(hookLoc) ? hookSpeed : hookSpeed * 3.6f;
             if (kmh < 0f) return null;
-            if (kmh < 1f && moveKmh >= MIN_KMH
+            if (kmh < 1f && moveKmh >= minKmh()
                     && SystemClock.elapsedRealtime() - lastPosAt <= SPEED_STALE_MS) {
                 // 位移换算只作参考：src=hook+move 不参与进入判定（见 gate 里的来源白名单）
                 return new Sample(moveKmh, "hook+move", accuracyOf(hookLoc));
@@ -454,7 +457,7 @@ final class AmapCruise {
     /** ③ 位移法：两个定位点之间跑了多远／多久（连速度字段都没有时兜底）。 */
     private static Sample fromDisplacement() {
         try {
-            if (lastPosAt <= 0 || moveKmh < MIN_KMH) return null;
+            if (lastPosAt <= 0 || moveKmh < minKmh()) return null;
             if (SystemClock.elapsedRealtime() - lastPosAt > SPEED_STALE_MS) return null;
             return new Sample(moveKmh, "move", -1f);
         } catch (Throwable t) {
@@ -511,7 +514,7 @@ final class AmapCruise {
             if (before > 0 && dt >= MOVE_MIN_DT_MS) {
                 float m = distanceMeters(pLat, pLng, lat, lng);
                 float kmh = (m / (dt / 1000f)) * 3.6f;
-                if (kmh >= MIN_KMH) moveKmh = kmh; else moveKmh = 0f;
+                if (kmh >= minKmh()) moveKmh = kmh; else moveKmh = 0f;
             }
         } catch (Throwable ignored) {}
     }
@@ -520,9 +523,29 @@ final class AmapCruise {
      * 统一的定位点记账：只有「精度可信 + 时间合理 + 单步速度自洽 + 不是原地抖动」的位移才累计。
      * 原来的实现只要 3 米就累加，静止时 20 秒的定位抖动都能凑满 120 米 —— 那才是误触发的根。
      */
+    /** 单步位移计入窗口的速度下限：低速档跟着 minKmh 降，默认档保持原来的 8 km/h。 */
+    private static float stepGateKmh() {
+        return Math.min(8f, Math.max(1.5f, minKmh() * 0.8f));
+    }
+
+    /** 窗口内需要的总位移：低速档收窄，默认档接近原来的 60 米。 */
+    private static float distNeedM() {
+        return Math.min(MIN_DIST_M, Math.max(15f, minKmh() * 3f));
+    }
+
+    /** 起点到当前点的净位移下限，沿用原来 0.75 的比例。 */
+    private static float netNeedM() {
+        return Math.min(MIN_NET_M, Math.max(11f, minKmh() * 3f * 0.75f));
+    }
+
+    /** 允许的最大定位精度：低速档放宽，走路时 GNSS 精度经常 50 米开外。 */
+    private static float accMaxM() {
+        return minKmh() <= 6 ? 120f : ACC_MAX_M;
+    }
+
     private static void addFix(double lat, double lng, float acc, boolean trusted) {
         long now = SystemClock.elapsedRealtime();
-        if (!trusted || acc < 0f || acc > ACC_MAX_M) {
+        if (!trusted || acc < 0f || acc > accMaxM()) {
             // 精度不可信：只更新锚点，不累计距离
             lastLat = lat; lastLng = lng; lastPosAt = now;
             return;
@@ -531,12 +554,12 @@ final class AmapCruise {
             long dt = now - lastPosAt;
             float m = distanceMeters(lastLat, lastLng, lat, lng);
             float stepKmh = dt > 0 ? (m / (dt / 1000f)) * 3.6f : 0f;
-            boolean dup = m < Math.max(1.5f, Math.min(4f, acc * 0.15f)); // 同一点重复上报 / 原地抖动
+            boolean dup = m < Math.max(1.0f, Math.min(4f, acc * 0.15f)); // 同一点重复上报 / 原地抖动（1.0m 起：走路每秒约 1.4m）
             boolean gap = dt < 800L || dt > 10000L;           // 太密或隔太久，速度不可信
             boolean jump = m > STEP_MAX_M || stepKmh > 220f;  // 多径跳点
             if (jump) {
                 posJumpAt = now;
-            } else if (!dup && !gap && stepKmh >= 8f) {       // 步行 ≈6km/h，8km/h 以上才算车在动
+            } else if (!dup && !gap && stepKmh >= stepGateKmh()) {
                 totalDistM += m;
                 distFixSeq++;
             }
@@ -556,7 +579,7 @@ final class AmapCruise {
             if (before > 0 && dt >= MOVE_MIN_DT_MS) {
                 float m = distanceMeters(pLat, pLng, l.getLatitude(), l.getLongitude());
                 float kmh = (m / (dt / 1000f)) * 3.6f;
-                if (kmh >= MIN_KMH) moveKmh = kmh; else moveKmh = 0f;
+                if (kmh >= minKmh()) moveKmh = kmh; else moveKmh = 0f;
             }
         } catch (Throwable ignored) {}
     }
@@ -666,9 +689,9 @@ final class AmapCruise {
         lastAcc = s.acc;
         // 纯位移换算（单点跳变就能算出几百 km/h）只能看，不能作为进入依据
         if ("move".equals(s.src) || "hook+move".equals(s.src)) return "src=" + s.src;
-        if (s.kmh < MIN_KMH) return "slow";
+        if (s.kmh < minKmh()) return "slow";
         if (s.kmh > MAX_KMH) return "fast";
-        if (s.acc >= 0f && s.acc > ACC_MAX_M) return "acc";
+        if (s.acc >= 0f && s.acc > accMaxM()) return "acc";
         if (posJumpAt > 0 && now - posJumpAt < 3000L) return "jump";
         if (prevKmh > 0f && Math.abs(s.kmh - prevKmh) > SPIKE_KMH) return "spike";
         return null;

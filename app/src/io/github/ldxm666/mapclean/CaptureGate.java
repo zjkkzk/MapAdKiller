@@ -180,7 +180,10 @@ public final class CaptureGate {
         // 提示走高德同款的底部小气泡（Toast），不弹大白框。
         final int files = capturedFiles(a);
         toast(a, "✓ 官方数据已抓取完成（" + files + " 项），点悬浮球 → 重启并启用模块");
-        android.util.Log.i(TAG, "event=capture_done_toast files=" + files);
+        // 提示一次就清标记。以前不清：用户重启后标记还在，于是每次打开都弹这条
+        // （用户反馈「抓好了还每次打开都弹」就是这个）。
+        clearRestartPending(a);
+        android.util.Log.i(TAG, "event=capture_done_toast files=" + files + " cleared=1");
     }
 
     private static boolean recaptureChecked;

@@ -302,12 +302,50 @@ public final class FloatingConfig {
     public static int writePath() {
         try {
             if (Vendor.tmap() || Vendor.baidu()) {
-                return App.service() != null ? WRITE_SVC : WRITE_NONE;
+                if (App.service() != null) return WRITE_SVC;
+                // 框架服务没绑上不等于写不进去：内置版 / NPatch 这类打过补丁的宿主里，服务通道
+                // 经常起不来，但宿主的 RemotePreferences 是可写的。只认服务会把能写的面板显示成
+                // 「只读 · 无法写入配置」—— 用户反馈的「第二次打开一直只读」就是这条。
+                return probeVendorPrefs() ? WRITE_PREFS : WRITE_NONE;
             }
             return AmapPanel.writePath();
         } catch (Throwable t) {
             return WRITE_NONE;
         }
+    }
+
+    /** -1 未探测 / 0 写不进 / 1 可写。只在本进程内缓存，进程重启后重新探测。 */
+    private static volatile int vendorPrefsProbe = -1;
+
+    /**
+     * 用一次真实写入判定厂商的偏好存储能不能写。
+     *
+     * <p>走反射是因为 {@code bmapclean.Cfg} / {@code tmapclean.Cfg} 在别的变体里整个包都被裁掉，
+     * 编译期不能直接引用。写一个临时键、立刻删掉，不污染配置。
+     */
+    private static boolean probeVendorPrefs() {
+        int known = vendorPrefsProbe;
+        if (known >= 0) return known == 1;
+        boolean ok = false;
+        try {
+            String cls = Vendor.baidu() ? "io.github.ldxm666.bmapclean.Cfg"
+                    : Vendor.tmap() ? "io.github.ldxm666.tmapclean.Cfg" : null;
+            if (cls != null) {
+                Object sp = Class.forName(cls).getMethod("prefs").invoke(null);
+                if (sp instanceof android.content.SharedPreferences) {
+                    android.content.SharedPreferences p = (android.content.SharedPreferences) sp;
+                    android.content.SharedPreferences.Editor e = p.edit();
+                    e.putLong("__write_probe", System.currentTimeMillis());
+                    ok = e.commit();
+                    if (ok) {
+                        try { p.edit().remove("__write_probe").commit(); } catch (Throwable ignored) {}
+                    }
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+        vendorPrefsProbe = ok ? 1 : 0;
+        return ok;
     }
 
     /** True when a writable path is currently available. */

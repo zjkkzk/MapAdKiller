@@ -27,8 +27,28 @@ final class AmapPanel {
 
     private AmapPanel() {}
 
+    /** 闭区间步进序列，给滑块的停靠点用（例如 5..60 步进 1）。 */
+    private static int[] steps(int from, int to, int step) {
+        int count = (to - from) / step + 1;
+        int[] out = new int[count];
+        for (int i = 0; i < count; i++) out[i] = from + i * step;
+        return out;
+    }
+
     static PanelTypes.Group[] groups() {
         return new PanelTypes.Group[]{
+            // 自动巡航的触发条件给用户自己调。默认值 = 2.2.7 之前写死的那套，升级后行为不变；
+            // 想更灵敏就把速度下限和持续时间一起调低（高德官方云控是 15 km/h / 5 秒）。
+            new PanelTypes.Group("自动巡航", new PanelTypes.Metric[]{
+                new PanelTypes.Metric(Config.K_CRUISE_KMH, "触发速度下限",
+                        "速度持续超过这个值才认为在开车。调低更容易进巡航，代价是骑车、坐车也可能被算进来。",
+                        "km/h", steps(Config.CRUISE_KMH_MIN, Config.CRUISE_KMH_MAX, 1), null,
+                        Config.CRUISE_KMH_DEFAULT),
+                new PanelTypes.Metric(Config.K_CRUISE_SEC, "触发持续时间",
+                        "速度持续达标多少秒后进入巡航。高德官方是 5 秒，默认 15 秒偏保守。",
+                        "秒", steps(Config.CRUISE_SEC_MIN, Config.CRUISE_SEC_MAX, 1), null,
+                        Config.CRUISE_SEC_DEFAULT),
+            }, "只影响高德。松手即生效，不用重启。"),
             new PanelTypes.Group("首页", new PanelTypes.Item[]{
                 new PanelTypes.Item(Config.K_TOOLS_VISIBLE, "首页工具宫格",
                         "关闭后首页不再显示驾车 / 公交等工具入口。"),
@@ -644,8 +664,12 @@ final class AmapPanel {
         try { service = io.github.ldxm666.mapadkiller.App.svc(); } catch (Throwable ignored) {}
         if (service != null) {
             try {
+                // commit 返回 true 不代表值留得住：内置版里 remote 是只读代理，commit 说成功、
+                // 下次读还是旧值。必须回读校验，对不上就落到下面的 Config.put
+                // （内置版走 CfgStore 的 local+remote 合并路径）。
                 if (service.getRemotePreferences(Config.PREF_GROUP)
-                        .edit().putInt(key, value).commit()) {
+                        .edit().putInt(key, value).commit()
+                        && Config.getInt(key, value == 0 ? 1 : 0) == value) {
                     markWrite(true, null);
                     Log.i(TAG_WRITE, "event=cfg_write_ok key=" + key + " via=svc");
                     invalidate();

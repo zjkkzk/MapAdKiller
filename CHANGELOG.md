@@ -1,3 +1,39 @@
+## v2.2.8（versionCode 2280）— 巡航可调 + 百度底栏/只读/日志三修
+
+发布日期：2026-10-28。版本码：2280。基线 v2.2.7（版本码 2270）。
+
+### 修复
+
+- **百度路线页「开始导航」消失**：`removeAndCollapse` 在刷新重建窗口里把整条底栏当成空壳收掉（兄弟未测量 → 误判「只剩我一个」），
+  宿主复用 View 实例后无法恢复。现在类名含 `BottomBar` / `PageBottom` 的容器一律不参与收壳。
+- **百度面板「只读 · 无法写入配置」误报**：`writePath()` 对百度/腾讯只认 `App.service()`，服务没绑上恒判 NONE。
+  改为服务缺失时做一次真实写入探测（`probeVendorPrefs()`），与高德 `effectiveBackend()` 一致。
+- **百度内置版日志抓取不可用**：变体把 `mapadkiller` 整包裁掉时 `CaptureLog` 被换成空实现，面板按钮点了没反应。
+  改为 `keepFiles` 保留真实 `H` / `CaptureLog`（并补 `AmapCruise` / `Config` 空实现的缺失成员）。
+- **高德抓取完成提示每次都弹**：`tick()` 只提示不清 `restart.pending`，重启后标记还在。现在提示一次即清。
+- **巡航参数存不住**：`Config.put(String,int)` 内置版直接写 remote（只读代理），commit 成功但读回旧值。
+  改为与布尔键同一条 `CfgStore` 路径（local 为准 + remote 镜像 + 回读自校验）。
+
+### 变更
+
+- **自动巡航触发值可调**：新增 `K_CRUISE_KMH` / `K_CRUISE_SEC`，地图内面板与模块 App 各有一组滑块（2–30 km/h、2–30 秒），默认 18 / 15 保持旧行为。
+- **低速档门槛自适应**：单步位移门槛 `min(8, max(1.5, minKmh×0.8))`、窗口总位移 `min(60, max(15, minKmh×3))`、
+  净位移 0.75×、精度上限低速档放宽到 120 米、dup 下限 1.5 → 1.0 米。走路可触发。
+- 模块 App 应用列表：已安装排前；未安装行去掉固定「推荐 x」；百度/高德/腾讯内嵌原生图标（`BaiduIconAsset` / `AmapIconAsset`）。
+- 滑块写入失败改为退回原值 + Toast「未连接地图：先打开高德，再回来调」。
+
+### 构建
+
+- `module.prop` 的 `version` / `versionCode` 改为构建时从 `Version.java` 生成（此前手写，2.2.5 起停在旧值）。
+
+### 产物
+
+- `Baidu-2.2.8-nonroot-embedded.apk`（228,784,616 B）
+- `Amap-2.2.8-nonroot-embedded.apk`（183,500,370 B）
+- `MapClean-lsp-v2.2.8.apk`（4,646,588 B）
+
+---
+
 ## v2.2.7（versionCode 2270）— 百度 22.1.0 适配、搜索 chip、路线页横幅
 
 发布日期：2026-10-27。版本码：2270。基线 v2.2.6（版本码 2260）。

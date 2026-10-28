@@ -1019,6 +1019,14 @@ public final class MainActivity extends Activity {
         addNoteRow(sec.card, "按固定工具 ID 控制显示。关闭全部首页推荐时采用原生工具数据构建等宽宫格，自动补位；图标与点击动作同步保留。");
         addSwitch(sec.card, "显示首页工具宫格", Config.K_TOOLS_VISIBLE);
         addSwitch(sec.card, "自动进入巡航（模块接管）", Config.K_CRUISE_AUTO);
+        addCruiseSlider(sec.card, "巡航触发速度下限", Config.K_CRUISE_KMH,
+                Config.CRUISE_KMH_MIN, Config.CRUISE_KMH_MAX, Config.CRUISE_KMH_DEFAULT, " km/h");
+        addCruiseSlider(sec.card, "巡航触发持续时间", Config.K_CRUISE_SEC,
+                Config.CRUISE_SEC_MIN, Config.CRUISE_SEC_MAX, Config.CRUISE_SEC_DEFAULT, " 秒");
+        addNoteRow(sec.card, "上面两个值决定「自动进入巡航」何时触发：速度持续超过下限、并保持够久才进入。"
+                + "默认 18 km/h / 15 秒；想更灵敏就一起调低（高德官方云控是 15 km/h / 5 秒）。"
+                + "\n\n调这两个值（以及上面那个开关）之前，高德必须先开着 —— 模块 App 和地图是两个进程，"
+                + "地图没运行时写入没有通道，会提示「未连接地图」。");
         addSwitch(sec.card, "反转开关：仅显示已打开的工具", Config.K_TOOLS_ALLOWLIST);
         addSwitch(sec.card, "工具图标统一彩绘（实验）", Config.K_TOOL_COLOR_ICON);
         addNoteRow(sec.card, "开启反转后，只保留你明确打开的工具；未设置、新增和未知工具全部隐藏。关闭反转可恢复原有默认值。修改后重开高德生效。");
@@ -2458,6 +2466,63 @@ public final class MainActivity extends Activity {
     /** 行上缓存的 haystack key。用框架不会占用的负数 id，避免再建 ids.xml。 */
     private static final int TAG_HAYSTACK = 0x7f0f0001;
     /** 统一规格开关行：60dp 最小高、左标题右侧胶囊开关、行间分隔线（写 RemotePreferences） */
+    /**
+     * 一行滑块（值 = min + position * 1）。高德「自动巡航」的两个触发值用它。
+     *
+     * <p>读写走 {@code Config.getInt/put}，和地图内悬浮球面板完全同一组 key，
+     * 两边改哪边都同步。
+     */
+    private void addCruiseSlider(LinearLayout card, String title, String key,
+                                 int min, int max, int def, String unit) {
+        LinearLayout row = skin.row();
+        row.setOrientation(LinearLayout.VERTICAL);
+
+        LinearLayout head = new LinearLayout(this);
+        head.setOrientation(LinearLayout.HORIZONTAL);
+        head.setGravity(Gravity.CENTER_VERTICAL);
+        head.addView(skin.text(title, Skin.T_ROW, Skin.MEDIUM, skin.text2),
+                new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        final TextView value = skin.text("", Skin.T_ROW, Skin.BOLD, skin.accent);
+        head.addView(value, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        row.addView(head, skin.matchWrap());
+
+        final int stops = (max - min) + 1;
+        // 先问服务（模块版：地图进程的 remote prefs），拿不到再退回本地（内置版同进程）。
+        final int init = Math.max(min, Math.min(max, App.readInt(key, Config.getInt(key, def))));
+        final GlassSlider slider = new GlassSlider(this);
+        slider.setStops(stops);
+        slider.setTrackColors(0x1F8A94A4, skin.accent, skin.accent);
+        slider.setTrackBandDp(40f);
+        slider.setPosition(init - min);
+        value.setText(init + unit);
+        slider.setContentDescription(title + "，" + init + unit);
+        slider.setOnPositionChange(new GlassSlider.OnPositionChange() {
+            @Override public void onPositionChanged(GlassSlider view, int position, boolean settled) {
+                int v = min + position;
+                value.setText(v + unit);
+                view.setContentDescription(title + "，" + v + unit);
+                if (settled) {
+                    // 只能走 App.writeInt：模块 App 和地图不是一个进程，写本地 prefs 地图侧永远读不到。
+                    // 写失败（服务没绑上 = 高德没运行）就退回原值并说明原因 —— 静默丢弃会让用户
+                    // 以为调好了，然后去怪巡航不触发。
+                    if (!App.writeInt(key, v)) {
+                        int back = Math.max(min, Math.min(max, App.readInt(key, def)));
+                        view.setPosition(back - min);
+                        value.setText(back + unit);
+                        view.setContentDescription(title + "，" + back + unit);
+                        Toast.makeText(MainActivity.this,
+                                "未连接地图：先打开高德，再回来调", Toast.LENGTH_SHORT).show();
+                    }
+                }
+            }
+        });
+        LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, skin.dp(56));
+        row.addView(slider, slp);
+        card.addView(row, skin.matchWrap());
+    }
+
     private void addSwitch(final LinearLayout card, String title, final String key) {
         LinearLayout row = newSwitchRow(card, key, title, null);
 
@@ -2775,11 +2840,23 @@ public final class MainActivity extends Activity {
         // 应用入口
         skin.addSection(root, "应用");
         LinearLayout apps = skin.listCard();
-        apps.addView(appRow("com.baidu.BaiduMap", "百度地图", 0));
-        apps.addView(skin.hairline());
-        apps.addView(appRow("com.autonavi.minimap", "高德地图", 1));
-        apps.addView(skin.hairline());
-        apps.addView(appRow("com.tencent.map", "腾讯地图", 2));
+        // 已安装的排前面，未安装的沉底；同类之间保持 百度 → 高德 → 腾讯 的固定顺序。
+        final String[] appPkgs = {"com.baidu.BaiduMap", "com.autonavi.minimap", "com.tencent.map"};
+        final String[] appNames = {"百度地图", "高德地图", "腾讯地图"};
+        Integer[] appOrder = {0, 1, 2};
+        java.util.Arrays.sort(appOrder, new java.util.Comparator<Integer>() {
+            @Override public int compare(Integer a, Integer b) {
+                boolean ia = installedVersion(appPkgs[a]) != null;
+                boolean ib = installedVersion(appPkgs[b]) != null;
+                if (ia != ib) return ia ? -1 : 1;
+                return a - b;
+            }
+        });
+        for (int k = 0; k < appOrder.length; k++) {
+            int idx = appOrder[k];
+            if (k > 0) apps.addView(skin.hairline());
+            apps.addView(appRow(appPkgs[idx], appNames[idx], idx));
+        }
         root.addView(apps, skin.matchWrap());
 
         // 作者与链接
@@ -3429,8 +3506,11 @@ public final class MainActivity extends Activity {
         LinearLayout.LayoutParams ilp = new LinearLayout.LayoutParams(skin.dp(32), skin.dp(32));
         ilp.rightMargin = skin.dp(12);
         // 优先用**该 App 的原生启动图标**（从它的 APK 里提出来内嵌的）；取不到才退回品牌色圆角图标。
+        // 三家的原生图标都内嵌了一份，未安装时也能显示自己的图标（不再只有腾讯有）。
         android.graphics.drawable.Drawable real =
-                "com.tencent.map".equals(pkg) ? TencentIconAsset.drawable(this) : null;
+                "com.tencent.map".equals(pkg) ? TencentIconAsset.drawable(this)
+              : "com.baidu.BaiduMap".equals(pkg) ? BaiduIconAsset.drawable(this)
+              : "com.autonavi.minimap".equals(pkg) ? AmapIconAsset.drawable(this) : null;
         if (real != null) {
             android.widget.ImageView iv = new android.widget.ImageView(this);
             iv.setImageDrawable(real);
@@ -3450,14 +3530,9 @@ public final class MainActivity extends Activity {
         row.addView(nameWrap, new LinearLayout.LayoutParams(
                 0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
-        String recommended = recommendedVersion(pkg);
-        if (recommended != null && recommended.length() > 0) {
-            TextView chip = skin.chip("推荐 " + recommended, skin.chipBg, skin.text3);
-            LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            clp.rightMargin = skin.dp(8);
-            row.addView(chip, clp);
-        }
+        // 未安装时**不再**显示「推荐 x」：那是模块验证过的固定版本号，跟用户手机装什么无关，
+        // 摆出来只会让人以为要装这个版本（用户反馈「推荐版本是测试机的固定版本」）。
+        // 已安装的行里「推荐」直接等于本机版本，见 recommendedVersion()。
         row.addView(new Icon(this, Icon.CHEVRON, skin.text3), fixed(skin, 18, 18));
 
         row.setOnClickListener(new View.OnClickListener() {

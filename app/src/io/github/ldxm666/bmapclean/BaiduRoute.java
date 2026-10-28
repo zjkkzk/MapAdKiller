@@ -490,10 +490,24 @@ final class BaiduRoute {
             Object parent = cur.getParent();
             if (!(parent instanceof android.view.ViewGroup)) break;
             android.view.ViewGroup group = (android.view.ViewGroup) parent;
+            // 底栏（以及它的各层壳）绝不收。刷新重建时兄弟还没量过，宽高都是 0，
+            // onlyOwnsMe 会误判成「只剩我一个」，于是整条底栏连同「开始导航」被一起 GONE 掉，
+            // 而且这个 View 实例会被宿主复用，之后再也回不来 —— 用户反馈的「刷新几次后
+            // 开始导航消失且无法恢复」就是这条。
+            if (isBottomBar(group)) break;
             if (!onlyOwnsMe(group, cur)) break;
             BaiduHooks.hide(group);
             cur = group;
         }
         if (root != null) root.requestLayout();
+    }
+
+    /** 底栏一族（含「开始导航」）：类名里带 BottomBar / PageBottom 的容器不参与收壳。 */
+    private static boolean isBottomBar(android.view.ViewGroup g) {
+        for (Class<?> c = g.getClass(); c != null && c != Object.class; c = c.getSuperclass()) {
+            String n = c.getName();
+            if (n.contains("BottomBar") || n.contains("PageBottom")) return true;
+        }
+        return false;
     }
 }

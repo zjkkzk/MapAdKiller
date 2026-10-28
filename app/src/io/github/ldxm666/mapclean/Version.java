@@ -6,10 +6,10 @@ public final class Version {
     private Version() {}
 
     /** 模块版本：与 module.prop、AndroidManifest 保持一致 */
-    public static final String NAME = "2.2.7";
+    public static final String NAME = "2.2.8";
     /** Full label shown in UI / module manager; the git tag uses the same string. */
-    public static final String LABEL = "2.2.7";
-    public static final int CODE = 2270;
+    public static final String LABEL = "2.2.8";
+    public static final int CODE = 2280;
 
     public static final String REPO = "https://github.com/ldxm666/MapAdKiller";
     public static final String RELEASES = REPO + "/releases/latest";

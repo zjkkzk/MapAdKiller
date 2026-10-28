@@ -9,6 +9,31 @@ import java.util.Map;
 public final class Config {
     public static final String PKG = "io.github.ldxm666.mapadkiller";
     public static final String PREF_GROUP = "amap_enhancer_config";
+
+    /* ------------------------------------------------------------------ 自动巡航触发值
+     * 面板「自动巡航」页的两个滑块写的就是这两个 key，AmapCruise 每次判定时读一次。
+     * 默认值 = 2.2.7 之前写死的那套（18 km/h、15 秒），所以老用户升级后行为不变。
+     * 高德自己的云控参数是 minSpeed=15 / driveTime=5 —— 我们之前比官方严得多，
+     * 这就是「自动巡航不够灵敏」的来源。
+     */
+    public static final String K_CRUISE_KMH = "cruise_min_kmh";
+    public static final String K_CRUISE_SEC = "cruise_drive_sec";
+    public static final int CRUISE_KMH_MIN = 2, CRUISE_KMH_MAX = 30, CRUISE_KMH_DEFAULT = 18;
+    public static final int CRUISE_SEC_MIN = 2, CRUISE_SEC_MAX = 30, CRUISE_SEC_DEFAULT = 15;
+
+    /** 触发速度下限（km/h），越界钳到 [CRUISE_KMH_MIN, CRUISE_KMH_MAX]。 */
+    public static int cruiseMinKmh() {
+        return clampInt(getInt(K_CRUISE_KMH, CRUISE_KMH_DEFAULT), CRUISE_KMH_MIN, CRUISE_KMH_MAX);
+    }
+
+    /** 触发持续时间（秒）。 */
+    public static int cruiseDriveSec() {
+        return clampInt(getInt(K_CRUISE_SEC, CRUISE_SEC_DEFAULT), CRUISE_SEC_MIN, CRUISE_SEC_MAX);
+    }
+
+    private static int clampInt(int v, int lo, int hi) {
+        return v < lo ? lo : (v > hi ? hi : v);
+    }
     public static final String K_TAB_PREFIX = "tab_", K_TOOL_PREFIX = "tool_";
     public static final String K_TOOLS_VISIBLE = "ui_tools_visible";
     public static final String K_TOOLS_ALLOWLIST = "ui_tools_allowlist";
@@ -637,6 +662,8 @@ public final class Config {
     /** 读 int（面板的滑块类配置用）；后端不可用时返回 fallback，绝不抛。 */
     public static int getInt(String key, int fallback) {
         try {
+            // 内置版必须走合并读（local + remote），否则写到 local 的值读不回来。
+            if (CfgStore.embedded()) return CfgStore.readInt(key, fallback);
             SharedPreferences p = prefs();
             return p == null ? fallback : p.getInt(key, fallback);
         } catch (Throwable t) {
@@ -646,6 +673,14 @@ public final class Config {
 
     /** 写 int 并立即 commit；成功返回 true。 */
     public static boolean put(String key, int value) {
+        // 内置版：和布尔键一样走 CfgStore（local 为准 + remote 镜像 + 回读自校验）。
+        // 以前这里直接写 remote，内置版 remote 是只读代理 → commit 说成功、下次读回默认值，
+        // 用户看到的就是「调好的触发值关掉悬浮窗又变回去」。
+        if (CfgStore.embedded()) {
+            boolean ok = CfgStore.writeInt(key, value);
+            if (ok) invalidate();
+            return ok;
+        }
         SharedPreferences.Editor e = edit();
         if (e == null) return false;
         boolean ok;

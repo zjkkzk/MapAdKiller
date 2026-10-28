@@ -30,6 +30,34 @@ public final class App extends Application implements XposedServiceHelper.OnServ
         }
     }
 
+    /**
+     * App 侧写 int（设置页的滑块走这条）。
+     *
+     * <p>必须走服务代理的 remote prefs：模块 App 和地图进程**不是一个进程**，
+     * 直接写本地 SharedPreferences 只有 App 自己看得见，hook 侧永远读不到 ——
+     * 表现就是「滑块拖了没反应、巡航不触发」。
+     */
+    public static boolean writeInt(String key, int value) {
+        XposedService s = service;
+        if (s == null) return false;
+        try {
+            return s.getRemotePreferences(Config.PREF_GROUP).edit().putInt(key, value).commit();
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    /** App 侧读 int：服务没连上就返回 fallback（内置版由面板自己读写，不走这里）。 */
+    public static int readInt(String key, int fallback) {
+        XposedService s = service;
+        if (s == null) return fallback;
+        try {
+            return s.getRemotePreferences(Config.PREF_GROUP).getInt(key, fallback);
+        } catch (Throwable t) {
+            return fallback;
+        }
+    }
+
     /** 恢复默认：清空全部配置键（全部显示） */
     public static boolean clearAll() {
         XposedService s = service;

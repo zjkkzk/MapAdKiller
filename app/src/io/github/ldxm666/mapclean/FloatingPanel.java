@@ -465,14 +465,14 @@ public final class FloatingPanel extends FrameLayout implements PanelTypes {
         LinearLayout head = new LinearLayout(context);
         head.setOrientation(LinearLayout.HORIZONTAL);
         head.setGravity(Gravity.CENTER_VERTICAL);
-        head.setPadding(UiKit.dp(context, 18), UiKit.dp(context, 16),
-                UiKit.dp(context, 12), UiKit.dp(context, 12));
+        head.setPadding(UiKit.dp(context, 20), UiKit.dp(context, 14),
+                UiKit.dp(context, 12), UiKit.dp(context, 10));
 
         // Author avatar: the picture shipped in res/drawable, cropped to a disc. Falls
         // back to the module icon, then to a monogram, so the header never shows a hole.
         AvatarBadge avatar = new AvatarBadge(context, "M", 0);
         avatar.setRingColor(dark ? 0x33FFFFFF : 0x1A000000);
-        int avatarSize = UiKit.dp(context, 44);
+        int avatarSize = UiKit.dp(context, 38);
         LinearLayout.LayoutParams avatarLp = new LinearLayout.LayoutParams(avatarSize, avatarSize);
         avatarLp.setMarginEnd(UiKit.dp(context, 12));
         head.addView(avatar, avatarLp);
@@ -494,7 +494,7 @@ public final class FloatingPanel extends FrameLayout implements PanelTypes {
 
         TextView title = new TextView(context);
         title.setText("MapAdKiller");
-        title.setTextSize(19f);
+        title.setTextSize(17f);
         title.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
         title.setTextColor(cTxP());
         title.setLetterSpacing(0.01f);
@@ -601,13 +601,14 @@ public final class FloatingPanel extends FrameLayout implements PanelTypes {
         link.addView(mark, markLp);
 
         TextView label = new TextView(context);
-        label.setText("MapAdKiller");
-        label.setTextSize(11.5f);
+        label.setText("GitHub");
+        label.setTextSize(11f);
         label.setTextColor(cTxS());
         link.addView(label);
 
         // Underline the label so it is unmistakably a link, and brighten the pair on press.
-        label.setPaintFlags(label.getPaintFlags() | android.graphics.Paint.UNDERLINE_TEXT_FLAG);
+        label.setSingleLine(true);
+        label.setEllipsize(android.text.TextUtils.TruncateAt.END);
         UiKit.pressable(link, 0.96f);
         link.setOnClickListener(new OnClickListener() {
             @Override public void onClick(View v) { openUrl(url); }
@@ -688,7 +689,7 @@ public final class FloatingPanel extends FrameLayout implements PanelTypes {
         if (backend == FloatingConfig.BACKEND_NONE) {
             // 「需要目标 App 运行中」 was self-contradictory here: the sheet IS inside the target
             // app. Say what is actually wrong, not where the user supposedly is.
-            statusPill.setText("○ 只读 · 无法写入配置");
+            statusPill.setText("○ 只读");
             statusPill.setTextColor(cDotBad());
             statusPill.setBackground(UiKit.plate(dark ? 0x26FF6B70 : 0x1AE5484D,
                     UiKit.dpf(context, 20f)));
@@ -702,7 +703,7 @@ public final class FloatingPanel extends FrameLayout implements PanelTypes {
             statusPill.setBackground(UiKit.plate(dark ? 0x26FFB020 : 0x1AF79009,
                     UiKit.dpf(context, 20f)));
         } else if (backend == FloatingConfig.BACKEND_REMOTE) {
-            statusPill.setText("● 已连接 · 可写入");
+            statusPill.setText("● 已连接");
             statusPill.setTextColor(cDotOk());
             statusPill.setBackground(UiKit.plate(dark ? 0x262BD88A : 0x1A12B76A,
                     UiKit.dpf(context, 20f)));
@@ -710,7 +711,7 @@ public final class FloatingPanel extends FrameLayout implements PanelTypes {
             // Local SharedPreferences backend: writable in-process, no framework channel
             // needed. This is the state the 免 root build falls back to on devices where the
             // remote channel never arrives.
-            statusPill.setText("● 可写入（本地）");
+            statusPill.setText("● 本地");
             statusPill.setTextColor(cAccent());
             statusPill.setBackground(UiKit.plate(dark ? 0x267AB1FF : 0x140A6CF5,
                     UiKit.dpf(context, 20f)));
@@ -987,11 +988,11 @@ public final class FloatingPanel extends FrameLayout implements PanelTypes {
         wrap.setOrientation(LinearLayout.HORIZONTAL);
         wrap.setGravity(Gravity.CENTER_VERTICAL);
         wrap.setBackground(UiKit.plate(dark ? 0x1AFFFFFF : 0x0F000000,
-                UiKit.dpf(context, 14f)));
+                UiKit.dpf(context, 12f)));
         wrap.setPadding(UiKit.dp(context, 12), 0, UiKit.dp(context, 8), 0);
 
         LinearLayout.LayoutParams wrapLp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, UiKit.dp(context, 42));
+                LinearLayout.LayoutParams.MATCH_PARENT, UiKit.dp(context, 40));
         wrapLp.leftMargin = UiKit.dp(context, 16);
         wrapLp.rightMargin = UiKit.dp(context, 16);
         wrapLp.bottomMargin = UiKit.dp(context, 10);
@@ -1007,7 +1008,7 @@ public final class FloatingPanel extends FrameLayout implements PanelTypes {
         searchField.setHint("搜索设置项 / 工具名");
         searchField.setHintTextColor(cTxS());
         searchField.setTextColor(cTxP());
-        searchField.setTextSize(14f);
+        searchField.setTextSize(13.5f);
         searchField.setSingleLine(true);
         searchField.setBackground(null);
         searchField.setPadding(UiKit.dp(context, 8), 0, UiKit.dp(context, 4), 0);
@@ -2292,6 +2293,9 @@ public final class FloatingPanel extends FrameLayout implements PanelTypes {
         open = true;
         openedAt = android.os.SystemClock.uptimeMillis();
         setVisibility(VISIBLE);
+        // 面板展开时把球收起来：球和面板是 host 里的兄弟，z 序在面板之上，
+        // 不收就会压在滑杆数值和右侧内容上（真机上是肉眼可见的“贴纸”感）。
+        if (ball != null) ball.setVisibility(GONE);
         // 内置版没有 MainActivity：首启「重要提示」原本只在 MainActivity.onCreate 里调用。
         // 悬浮面板是内置版唯一的设置入口，所以在这里补上唯一一处调用（FirstRunNotice 内部
         // 全 try/catch，弹窗失败也绝不会拖垮面板）。
@@ -2368,7 +2372,7 @@ public final class FloatingPanel extends FrameLayout implements PanelTypes {
         card.animate().translationY(UiKit.dp(context, 420)).alpha(0f)
                 .setDuration(UiKit.DUR_BASE).setInterpolator(UiKit.ACCELERATE)
                 .withEndAction(new Runnable() {
-                    @Override public void run() { setVisibility(GONE); }
+                    @Override public void run() { setVisibility(GONE); if (ball != null) ball.setVisibility(VISIBLE); }
                 }).start();
         UiKit.animateFloat(0.42f, 0f, UiKit.ACCELERATE, UiKit.DUR_BASE,
                 new ValueAnimator.AnimatorUpdateListener() {

@@ -119,6 +119,49 @@ final class CfgStore {
         return ok;
     }
 
+    /** 合并读 int（local 打底、remote 覆盖，与布尔同一条路径）。 */
+    static int readInt(String key, int fallback) {
+        try {
+            Map<String, Object> all = readAll();
+            Object v = all.get(key);
+            return v instanceof Integer ? (Integer) v : fallback;
+        } catch (Throwable t) {
+            return fallback;
+        }
+    }
+
+    /**
+     * 写 int 键。和 {@link #write(String, boolean)} 同一套语义：
+     * 内置版以 local 为准 + remote 镜像，模块版 remote 优先 + local 镜像。
+     *
+     * <p>为什么必须补这个：{@code Config.put(String,int)} 以前直接写 remote，
+     * 内置版里 remote 是只读代理，commit 返回 true 但下次读不回来 ——
+     * 用户调好的「自动巡航触发值」关一次悬浮窗就回到默认。
+     */
+    static boolean writeInt(String key, int value) {
+        boolean emb = embedded();
+        boolean okLocal = commitInt(local(), key, value);
+        boolean okRemote = commitInt(remote(), key, value);
+        boolean ok = emb ? okLocal : (okRemote || okLocal);
+        try {
+            int back = readInt(key, value == 0 ? 1 : 0);
+            H.log(back == value ? Log.INFO : Log.WARN, MainHook.TAG,
+                    "event=cfg_write_int key=" + key + " value=" + value + " readback=" + back
+                            + " backend=" + (emb ? "local" : "remote")
+                            + " local=" + okLocal + " remote=" + okRemote);
+        } catch (Throwable ignored) {}
+        return ok;
+    }
+
+    private static boolean commitInt(SharedPreferences p, String key, int value) {
+        if (p == null) return false;
+        try {
+            return p.edit().putInt(key, value).commit();
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
     private static boolean commit(SharedPreferences p, String key, boolean value) {
         if (p == null) return false;
         try {
